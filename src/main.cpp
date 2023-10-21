@@ -1,70 +1,3 @@
-// #include <Arduino.h>
-// #include <Wire.h>
-// #include <Adafruit_GFX.h>
-// #include <heltec.h>
-
-
-// int counter = 1;
-// unsigned long tiempo = millis();
-
-// //rotate only for GEOMETRY_128_64
-// SSD1306Wire display(0x3c, SDA_OLED, SCL_OLED, RST_OLED);
-
-// void VextON(void)
-//         {
-//         pinMode(Vext,OUTPUT);
-//         digitalWrite(Vext, LOW);
-//         };
-
-// void VextOFF(void) //Vext default OFF
-//         {
-//         pinMode(Vext,OUTPUT);
-//         digitalWrite(Vext, HIGH);
-//         };
-
-
-
-// void setup(){
-//     display.init();
-//     delay(100);
-
-//     display.init();
-//     display.clear();
-//     display.display();
-
-//     display.setContrast(255);
-
-//     display.setTextAlignment(TEXT_ALIGN_CENTER);
-//     display.clear();
-//     display.display();
-//     display.screenRotate(ANGLE_0_DEGREE);
-//     display.setFont(ArialMT_Plain_16);
-//     display.drawString(64, 32 - 16 / 2, "FaCENA-UNNE");
-//     display.display();
-//     delay(5000);
-// };
-
-// void loop(){
-
-//   display.clear();
-//   // display.screenRotate(ANGLE_270_DEGREE);
-//   display.setTextAlignment(TEXT_ALIGN_LEFT);
-//   display.setFont(ArialMT_Plain_10);
-//   display.drawString(0, 2, "Temp: ");
-//   display.drawString(0, 14, "Hum: ");
-//   // display.drawString(0, 26, "Tiempo: "+ String(tiempo) + " ms.");
-//   display.drawString(0, 38, "Cant: " + String(counter));
-//   display.display();
-  
-
-
-
-//   counter++;
-//   delay(1000);
-// };
-
-
-
 /*******************************************************************************
  * The Things Network - Sensor Data Example
  *
@@ -88,6 +21,8 @@
 #include <hal/hal.h>
 #include <SPI.h>
 #include <Wire.h>
+#include "HOled.h"
+
 
 
 // include the DHT11 Sensor Library
@@ -122,7 +57,7 @@ void os_getDevEui (u1_t* buf) { memcpy_P(buf, DEVEUI, 8);}
 // This key should be in big endian format (or, since it is not really a
 // number but a block of memory, endianness does not really apply). In
 // practice, a key taken from the TTN console can be copied as-is.
-static const u1_t PROGMEM APPKEY[16] = { 0x44, 0x5A, 0x2C, 0xA5, 0x26, 0xFD, 0x33, 0x01, 0x0F, 0xBB, 0x1B, 0x24, 0xDF, 0xD1, 0x90, 0x82 };
+static const u1_t PROGMEM APPKEY[16] = {0x44, 0x5A, 0x2C, 0xA5, 0x26, 0xFD, 0x33, 0x01, 0x0F, 0xBB, 0x1B, 0x24, 0xDF, 0xD1, 0x90, 0x82};
 void os_getDevKey (u1_t* buf) {  memcpy_P(buf, APPKEY, 16);}
 
 // payload to send to TTN gateway
@@ -131,7 +66,7 @@ static osjob_t sendjob;
 
 // Schedule TX every this many seconds (might become longer due to duty
 // cycle limitations).
-const unsigned TX_INTERVAL = 30;
+const unsigned TX_INTERVAL = 15;
 
 // Pin mapping for Adafruit Feather M0 LoRa
 // /!\ By default Adafruit Feather M0's pin 6 and DIO1 are not connected.
@@ -145,6 +80,17 @@ const lmic_pinmap lmic_pins = {
 
 // init. DHT
 DHT dht(DHTPIN, DHTTYPE);
+
+
+
+
+bool enable = true;
+String alert = "Enable";
+float temp;
+float hum;
+HOled ho = HOled(enable, temp, hum);
+
+
 
 void printHex2(unsigned v) {
     v &= 0xff;
@@ -162,15 +108,23 @@ void do_send(osjob_t* j){
         float temperature = dht.readTemperature();
         Serial.print("Temperature: "); Serial.print(temperature);
         Serial.println(" *C");
-        // adjust for the f2sflt16 range (-1 to 1)
-        temperature = temperature / 100;
-
-        // read the humidity from the DHT11
+         // read the humidity from the DHT11
         float rHumidity = dht.readHumidity();
         Serial.print("%RH ");
         Serial.println(rHumidity);
+
+        ho.tempHum(temperature, rHumidity);
+
+        // adjust for the f2sflt16 range (-1 to 1)
+        temperature = temperature / 100;
+
+        
+        
+    
         // adjust for the f2sflt16 range (-1 to 1)
         rHumidity = rHumidity / 100;
+
+        
 
         // float -> int
         // note: this uses the sflt16 datum (https://github.com/mcci-catena/arduino-lmic#sflt16)
@@ -319,20 +273,27 @@ void onEvent (ev_t ev) {
             Serial.println((unsigned) ev);
             break;
     }
-}
+};
 
 
 
 void setup() {
+
+    
     //delay(5000);
     //while (! Serial);
     Serial.begin(9600);
     Serial.println(F("Starting"));
 
     dht.begin();
+    
+    ho.init();
+    ho.present();
+
 
     // LMIC init
     os_init();
+    
     // Reset the MAC state. Session and pending data transfers will be discarded.
     LMIC_reset();
     // Disable link-check mode and ADR, because ADR tends to complicate testing.
@@ -347,13 +308,22 @@ void setup() {
 
     // Start job (sending automatically starts OTAA too)
     do_send(&sendjob);
+
+    ho.present();
+  
 };
 
 void loop() {
+
+    
+
+
+
   // we call the LMIC's runloop processor. This will cause things to happen based on events and time. One
   // of the things that will happen is callbacks for transmission complete or received messages. We also
   // use this loop to queue periodic data transmissions.  You can put other things here in the `loop()` routine,
   // but beware that LoRaWAN timing is pretty tight, so if you do more than a few milliseconds of work, you
   // will want to call `os_runloop_once()` every so often, to keep the radio running.
-  os_runloop_once();
+    os_runloop_once();
+    
 };

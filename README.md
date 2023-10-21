@@ -8,10 +8,16 @@ Proyecto realizado por equipos de desarrollo de la Universidad Nacional del Nord
 ## Equipo de Desarrollo
 - Ing. Sosa Gaston Martin.
 - Ing. Valentin Vizcaychipi.
-- Gabriel Molteni.
+- Facundo Gabriel Molteni Morales.
 
 
 ## Librerias Utilizadads
 - MCCI LMIC
-- DHT11 sensor
-- LoRAWAN
+- DHT Sensor Library
+- Heltec ESP32
+
+## Plataforma de Desarrollo
+- PlatformIO
+
+## PLacas Soportadas
+- Heltec WiFi LoRA V2
