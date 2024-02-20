@@ -1,0 +1,7 @@
+received_at	application_id	device_id	f_port	f_cnt	rssi	snr	data_rate_index	consumed_airtime	frm_payload	decoded_payload
+2024-02-18T00:48:10.823399226Z	firework	eui-70b3d57ed005de4f	1	443	-26	9.5	-	0.051456s	KXTNbA==	{'degreesC': 26.0009765625, 'humidity': 15.00244140625}
+2024-02-18T00:48:31.959484001Z	firework	eui-70b3d57ed005de4f	1	444	-25	13.3	-	0.051456s	KXTNbA==	{'degreesC': 26.0009765625, 'humidity': 15.00244140625}
+2024-02-18T00:48:53.123942897Z	firework	eui-70b3d57ed005de4f	1	445	-26	13	-	0.051456s	KXTNbA==	{'degreesC': 26.0009765625, 'humidity': 15.00244140625}
+2024-02-18T00:49:14.261823354Z	firework	eui-70b3d57ed005de4f	1	446	-25	13	-	0.051456s	KXTNbA==	{'degreesC': 26.0009765625, 'humidity': 15.00244140625}
+2024-02-18T00:49:35.420841144Z	firework	eui-70b3d57ed005de4f	1	447	-27	13.3	-	0.051456s	KXTNbA==	{'degreesC': 26.0009765625, 'humidity': 15.00244140625}
+2024-02-18T00:49:56.550531599Z	firework	eui-70b3d57ed005de4f	1	448	-28	14	-	0.051456s	KXTNbA==	{'degreesC': 26.0009765625, 'humidity': 15.00244140625}
