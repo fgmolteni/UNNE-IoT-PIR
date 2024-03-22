@@ -21,7 +21,7 @@ from datetime import datetime
 #    NNSXS.XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX.XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 #
 USER = "firework@ttn"
-PASSWORD = "NNSXS.UTIGWWXDBPMH7CLWZAP65JM7HGELPXZAQ4V56LQ.AUGGSOXTUGAZJVQSVDYSIJVK7TTCDQPVSQZYIFEKY4L7YC5YOLTA"
+PASSWORD = "NNSXS.FMGMPBTMKXQ5ZRB3LKWMH7X7PWYN34VQ3VTVUCA.SE35UDJS6X4CF5N2CAXVMLLYEBUOFBBK5JEIOQCQ4EIN3DNYLVFQ"
 PUBLIC_TLS_ADDRESS = "nam1.cloud.thethings.network"
 PUBLIC_TLS_ADDRESS_PORT = 8883
 DEVICE_ID = "eui-70b3d57ed005de4f"
@@ -133,14 +133,15 @@ def on_log(client, userdata, level, buf):
 client_id = f'python-mqtt-{random.randint(0, 1000)}'
 
 print("Create new mqtt client instance")
-mqttc = mqtt.Client(client_id)
+mqttc = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION1, 
+                    client_id=client_id)
 
 print("Assign callback functions")
 mqttc.on_connect = on_connect
 mqttc.on_subscribe = on_subscribe
 mqttc.on_message = on_message
 mqttc.on_disconnect = on_disconnect
-# mqttc.on_log = on_log  # Logging for debugging OK, waste
+mqttc.on_log = on_log  # Logging for debugging OK, waste
 
 # Setup authentication from settings above
 mqttc.username_pw_set(USER, PASSWORD)
