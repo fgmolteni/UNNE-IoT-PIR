@@ -5,3 +5,4 @@
 .vscode/ipch
 .dependencies
 .venv
+.backend\module\__pycache__
