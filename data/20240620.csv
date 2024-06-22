@@ -1,0 +1,7 @@
+received_at,application_id,device_id,f_port,f_cnt,rssi,snr,data_rate_index,consumed_airtime,frm_payload,decoded_payload
+2024-06-21T01:17:11.742512992Z,firework,eui-70b3d57ed005de4f,1,2,-42,13.5,-,0.051456s,/3//fw==,"{'degreesC': 99.9512, 'humidity': 99.9512}"
+2024-06-21T01:17:49.566761139Z,firework,eui-70b3d57ed005de4f,1,6,-42,13.3,-,0.051456s,/3//fw==,"{'degreesC': 99.9512, 'humidity': 99.9512}"
+2024-06-21T01:18:38.499662364Z,firework,eui-70b3d57ed005de4f,1,12,-50,13,-,0.051456s,/3//fw==,"{'degreesC': 99.9512, 'humidity': 99.9512}"
+2024-06-21T01:18:59.692109857Z,firework,eui-70b3d57ed005de4f,1,13,-49,13,-,0.051456s,/3//fw==,"{'degreesC': 99.9512, 'humidity': 99.9512}"
+2024-06-21T01:19:20.860632363Z,firework,eui-70b3d57ed005de4f,1,14,-49,11,-,0.051456s,/3//fw==,"{'degreesC': 99.9512, 'humidity': 99.9512}"
+2024-06-21T01:19:42.040169342Z,firework,eui-70b3d57ed005de4f,1,15,-54,13.8,-,0.051456s,/3//fw==,"{'degreesC': 99.9512, 'humidity': 99.9512}"
