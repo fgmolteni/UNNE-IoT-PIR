@@ -7,6 +7,7 @@ def run_client():
     import csv
     import random
     from datetime import datetime
+    import pytz
 
     # Procedure to get the USER, PASSWORD, PUBLIC_TLS_ADDRESS and PUBLIC_TLS_ADDRESS_PORT:
     # 1. Login to The Things Stack Community Edition console
@@ -80,7 +81,7 @@ def run_client():
                 consumed_airtime = get_value_from_json_object(uplink_message, "consumed_airtime")
 
                 # Daily log of uplinks
-                now = datetime.now()
+                now = datetime.now(pytz.timezone('America/Buenos_Aires'))
                 path_data_folder = r'./data/'
                 if not os.path.exists(path_data_folder):
                     os.mkdir(path_data_folder)
