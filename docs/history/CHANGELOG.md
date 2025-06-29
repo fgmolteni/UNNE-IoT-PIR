@@ -32,6 +32,13 @@ Se estandarizó el nombre de los entornos virtuales de Python a `.venv/` (oculto
 -   **Refinamiento de información**: Se realizaron ajustes y correcciones en la información de configuración del agente.
 -   **Definición de proceso de documentación**: Se estableció un mecanismo para que el agente documente sus acciones en el registro de cambios.
 
+## 5. Gestión de Archivos de VS Code
+
+Se optimizó la gestión de los archivos de configuración de Visual Studio Code en el repositorio.
+
+-   **Exclusión de archivos locales**: Se actualizó el `.gitignore` para excluir configuraciones locales y de caché (`.vscode/*`), previniendo que archivos específicos del entorno de un desarrollador sean subidos al repositorio.
+-   **Inclusión de configuraciones recomendadas**: Se mantuvieron los archivos `settings.json` y `extensions.json` en el control de versiones para asegurar que todos los colaboradores utilicen una configuración base coherente y las extensiones recomendadas para el proyecto.
+
 ---
 
 Este registro se mantendrá actualizado con futuros cambios significativos en la estructura o configuración del proyecto.
