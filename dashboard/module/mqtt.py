@@ -1,0 +1,1 @@
+# This module is deprecated. The MQTT logic is now in the mqtt_service directory.

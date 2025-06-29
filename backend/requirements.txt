@@ -1,7 +1,0 @@
-pandas
-numpy == 1.26.4
-matplotlib
-seaborn
-plotly
-requests
-paho-mqtt

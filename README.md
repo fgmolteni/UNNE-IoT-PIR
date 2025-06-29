@@ -35,18 +35,20 @@ Utilizar version 1 de mqtt
 
 ## Estructura
 
-		Proyecto
-		|
-		+---->	Firmware Nodo-Red
-		|		|
-		|		+--->	Sensores.
-		|		|
-		|		+--->	Display OLED. 
-		|		|
-		|		+--->	Envió de Datos.
-		|
-		+---->	Cliente MQTT
-				|
-				+--->	*Almacenamiento*
-				|
-				+--->	*Visualizacion*
+```
+UNNE-IoT-PIR/
+├── firmware/             # Código del dispositivo físico (sensor)
+├── mqtt_service/         # Servicio Python para escuchar y guardar datos MQTT
+├── dashboard/            # Aplicación Streamlit para visualización de datos
+├── gateway/              # Archivos de configuración y notas del Gateway LoRa
+├── data/                 # Almacenamiento centralizado de datos (CSV, etc.)
+├── docs/                 # Documentación del proyecto
+│   ├── history/          # Historial de cambios del proyecto (CHANGELOG)
+│   └── circuit_diagrams/ # Esquemas de circuitos y documentación de hardware
+├── .gitignore            # Archivo de ignorados de Git
+└── README.md             # Descripción general del proyecto
+```
+
+## Registro de Cambios
+
+Para ver un historial detallado de los cambios y la evolución de la estructura del proyecto, consulta el [CHANGELOG](docs/history/CHANGELOG.md).
