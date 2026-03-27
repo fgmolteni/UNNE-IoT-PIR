@@ -1,54 +1,38 @@
-# UNNE-IoT-PIR
-Proyecto realizado por equipos de desarrollo de la Universidad Nacional del Nordeste (UNNE). Desarrollo de redes de nodos IoT mediante conexión LoRa, para la prevención de incendios rurales. 
+# UNNE-IoT-PIR - Sistema IoT de Prevencion de Incendios Rurales
 
-## Directores
-- Dra. Maria Ines Pisarello.
-- Ing. Tito Chiozza.
+Esta rama contiene la migracion del firmware de la placa `Heltec WiFi LoRa 32 V2` a `ESP-IDF puro`.
 
-## Equipo de Desarrollo
-- Ing. Sosa Gaston Martin.
-- Ing. Valentin Vizcaychipi.
-- Facundo Gabriel Molteni Morales.
+## Estado de la rama
 
+Primera iteracion completada para el firmware:
 
-## Librerias Utilizadads
-- MCCI LMIC
-- DHT Sensor Library
-- Heltec ESP32
+- estructura ESP-IDF limpia
+- OLED integrada funcionando con driver SSD1306 propio
+- lectura de DHT11
+- logs serie con `ESP_LOGI`
 
-## Plataforma de Desarrollo
-- PlatformIO
+Todavia no incluye TTN ni LoRaWAN. Esa integracion queda como siguiente fase.
 
-## PLacas Soportadas
-- Heltec WiFi LoRA V2
+## Directorios relevantes
 
+- `firmware/`: firmware ESP-IDF puro para la Heltec V2
+- `docs/`: documentacion del proyecto y diagramas
 
-## Conexión por MQTT
-Realizamos una conexión al los servidores de TTN mediante el montaje de un servidor MQTT, este enviara los datos desde los TTN a los "suscriptores", para ello realizamos un script en python.
+## Flujo de trabajo del firmware
 
-primero debemos habilitar una API keys en TTN, es lo hacemos yendo a la aplicación de nuestro dispositivo. Seguidamente nos vamos al apartado **Integraciones>>MQTT** y añadimos una nueva api-keys.
-
-
-## Observaciones
-
-Utilizar version 1 de mqtt
-
-## Estructura
-
-```
-UNNE-IoT-PIR/
-├── firmware/             # Código del dispositivo físico (sensor)
-├── mqtt_service/         # Servicio Python para escuchar y guardar datos MQTT
-├── dashboard/            # Aplicación Streamlit para visualización de datos
-├── gateway/              # Archivos de configuración y notas del Gateway LoRa
-├── data/                 # Almacenamiento centralizado de datos (CSV, etc.)
-├── docs/                 # Documentación del proyecto
-│   ├── history/          # Historial de cambios del proyecto (CHANGELOG)
-│   └── circuit_diagrams/ # Esquemas de circuitos y documentación de hardware
-├── .gitignore            # Archivo de ignorados de Git
-└── README.md             # Descripción general del proyecto
+```bash
+cd firmware
+idf.py set-target esp32
+idf.py build
+idf.py flash monitor
 ```
 
-## Registro de Cambios
+## Resumen de la migracion
 
-Para ver un historial detallado de los cambios y la evolución de la estructura del proyecto, consulta el [CHANGELOG](docs/history/CHANGELOG.md).
+- Se elimino la dependencia de PlatformIO para el firmware de esta rama.
+- Se elimino la dependencia de Arduino para OLED y DHT11.
+- Se dejo una base liviana para continuar con TTN desde ESP-IDF puro.
+
+## Proximo paso recomendado
+
+- integrar TTN/LoRaWAN AU915 sobre la nueva arquitectura modular de `firmware/`
