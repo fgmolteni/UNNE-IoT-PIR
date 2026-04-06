@@ -28,6 +28,15 @@ logs/
 # Gemini tool cache/config
 .gemini/
 
+# Claude Code local state
+.claude/
+
+# clangd index cache
+firmware/.cache/
+
+# ESP-IDF extension generated VS Code config inside firmware/
+firmware/.vscode/
+
 # ====================================================================
 # Python Specific
 # ====================================================================
@@ -50,15 +59,17 @@ dist/
 htmlcov/
 
 # ====================================================================
-# PlatformIO & Firmware Specific
+# Firmware / ESP-IDF
 # ====================================================================
-# PlatformIO core folder
+# Old PlatformIO artifacts
 .pio/
-
-# Old dependency folder (if any)
 .dependencies/
-
-# Firmware build and dependency artifacts
-firmware/.pio/*
+firmware/.pio/
 firmware/dependencies/
 firmware/test/
+
+# ESP-IDF generated files
+firmware/build/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/managed_components/

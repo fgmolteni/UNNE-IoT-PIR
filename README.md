@@ -11,7 +11,7 @@ Primera iteracion completada para el firmware:
 - lectura de DHT11
 - logs serie con `ESP_LOGI`
 
-Todavia no incluye TTN ni LoRaWAN. Esa integracion queda como siguiente fase.
+Esta version del firmware queda limitada a OLED + DHT11, sin integracion LoRa ni TTN.
 
 ## Directorios relevantes
 
@@ -31,8 +31,9 @@ idf.py flash monitor
 
 - Se elimino la dependencia de PlatformIO para el firmware de esta rama.
 - Se elimino la dependencia de Arduino para OLED y DHT11.
-- Se dejo una base liviana para continuar con TTN desde ESP-IDF puro.
+- Se dejo una base liviana enfocada en sensado y visualizacion local.
 
-## Proximo paso recomendado
+## Alcance actual
 
-- integrar TTN/LoRaWAN AU915 sobre la nueva arquitectura modular de `firmware/`
+- sensado local con `DHT11`
+- visualizacion local en OLED

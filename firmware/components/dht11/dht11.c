@@ -9,8 +9,8 @@
 #include "freertos/task.h"
 
 #define DHT11_START_SIGNAL_MS 20
-#define DHT11_RESPONSE_TIMEOUT_US 120
-#define DHT11_BIT_TIMEOUT_US 100
+#define DHT11_RESPONSE_TIMEOUT_US 200
+#define DHT11_BIT_TIMEOUT_US 150
 
 static esp_err_t wait_for_level(gpio_num_t pin, int level, uint32_t timeout_us, uint32_t *pulse_width_us) {
     int64_t start = esp_timer_get_time();
@@ -48,11 +48,13 @@ esp_err_t dht11_read(const dht11_t *sensor, float *temperature_c, float *humidit
     uint8_t data[5] = {0};
 
     ESP_ERROR_CHECK(gpio_set_direction(sensor->pin, GPIO_MODE_OUTPUT_OD));
+    ESP_ERROR_CHECK(gpio_set_pull_mode(sensor->pin, GPIO_PULLUP_ONLY));
     ESP_ERROR_CHECK(gpio_set_level(sensor->pin, 0));
     vTaskDelay(pdMS_TO_TICKS(DHT11_START_SIGNAL_MS));
     ESP_ERROR_CHECK(gpio_set_level(sensor->pin, 1));
     esp_rom_delay_us(30);
     ESP_ERROR_CHECK(gpio_set_direction(sensor->pin, GPIO_MODE_INPUT));
+    ESP_ERROR_CHECK(gpio_set_pull_mode(sensor->pin, GPIO_PULLUP_ONLY));
 
     if (wait_for_level(sensor->pin, 1, DHT11_RESPONSE_TIMEOUT_US, NULL) != ESP_OK ||
         wait_for_level(sensor->pin, 0, DHT11_RESPONSE_TIMEOUT_US, NULL) != ESP_OK ||

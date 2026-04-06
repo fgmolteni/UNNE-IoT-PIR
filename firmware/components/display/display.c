@@ -208,3 +208,142 @@ esp_err_t display_show_sensor_data(float temperature_c, float humidity_percent) 
     buffer_draw_text(0, 4, hum_line);
     return flush_buffer();
 }
+
+esp_err_t display_show_lora_tx(int tx_count, int chunks_ok, int chunks_total) {
+    char line1[22];
+    char line2[22];
+
+    /*
+     * Cada página del SSD1306 tiene 8px de alto.
+     * buffer_draw_text(x, page, text) escribe en la página indicada.
+     * Usamos pages 0, 2, 4, 6 para dejar espacio entre líneas.
+     */
+    snprintf(line1, sizeof(line1), "TX %d  %d/%d OK", tx_count, chunks_ok, chunks_total);
+    snprintf(line2, sizeof(line2), "SF10 BW125");
+
+    memset(s_buffer, 0, sizeof(s_buffer));
+    buffer_draw_text(0, 0, "LORA TX");
+    buffer_draw_text(0, 2, line1);
+    buffer_draw_text(0, 4, line2);
+    buffer_draw_text(0, 6, "915 MHZ");
+    return flush_buffer();
+}
+
+esp_err_t display_show_lora_rx(int img_count, int16_t rssi, int8_t snr) {
+    char line1[22];
+    char line2[22];
+    char line3[22];
+
+    snprintf(line1, sizeof(line1), "IMG %d OK", img_count);
+
+    /*
+     * RSSI puede ser negativo (ej: -87). El font no tiene el signo '-'
+     * así que lo manejamos con la lógica de snprintf y el font ya tiene '-'.
+     */
+    snprintf(line2, sizeof(line2), "RSSI %d DBM", (int)rssi);
+    snprintf(line3, sizeof(line3), "SNR %d DB",   (int)snr);
+
+    memset(s_buffer, 0, sizeof(s_buffer));
+    buffer_draw_text(0, 0, "LORA RX");
+    buffer_draw_text(0, 2, line1);
+    buffer_draw_text(0, 4, line2);
+    buffer_draw_text(0, 6, line3);
+    return flush_buffer();
+}
+
+esp_err_t display_show_lora_waiting(void) {
+    memset(s_buffer, 0, sizeof(s_buffer));
+    buffer_draw_text(0, 0, "LORA RX");
+    buffer_draw_text(0, 2, "WAITING");
+    buffer_draw_text(0, 4, "SF10 BW125");
+    buffer_draw_text(0, 6, "915 MHZ");
+    return flush_buffer();
+}
+
+esp_err_t display_show_lora_rx_image(const uint8_t *img,
+                                      int img_count,
+                                      int16_t rssi,
+                                      int8_t  snr,
+                                      int     chunks_ok,
+                                      int     chunks_total)
+{
+    /*
+     * Renderizado de imagen 16x16 escalada x3 en la mitad izquierda.
+     *
+     * El SSD1306 organiza la memoria en páginas de 8 filas verticales.
+     * s_buffer[page * 128 + col] = byte que representa 8 píxeles verticales
+     * en la columna `col` de la página `page`.
+     *
+     * Para escalar x3: cada píxel de la imagen ocupa 3 columnas x 3 filas
+     * en la pantalla. Como la imagen tiene 16 columnas x 16 filas:
+     *   - Ancho renderizado: 16 x 3 = 48 px (columnas 0..47)
+     *   - Alto renderizado:  16 x 3 = 48 px (páginas 0..5, filas 0..47)
+     *
+     * Para cada píxel (img_x, img_y):
+     *   - pantalla_col_inicio = img_x * 3
+     *   - pantalla_fila_inicio = img_y * 3
+     * Las 3 filas de pantalla caen en hasta 2 páginas distintas.
+     * Para cada fila de pantalla `pf` en [pf_ini, pf_ini+2]:
+     *   - page = pf / 8
+     *   - bit  = pf % 8
+     *   Si el píxel es blanco (val > 127), setear ese bit en las 3 columnas.
+     */
+    memset(s_buffer, 0, sizeof(s_buffer));
+
+    for (int img_y = 0; img_y < 16; img_y++) {
+        for (int img_x = 0; img_x < 16; img_x++) {
+
+            uint8_t val = img[img_y * 16 + img_x];
+            if (val <= 127) continue;   /* negro — bits ya en 0 */
+
+            /* Rango de filas de pantalla que ocupa este píxel */
+            int pf_start = img_y * 3;
+
+            for (int df = 0; df < 3; df++) {          /* 3 filas de pantalla */
+                int pf   = pf_start + df;
+                int page = pf / 8;
+                int bit  = pf % 8;
+
+                if (page >= OLED_PAGE_COUNT) continue;
+
+                for (int dc = 0; dc < 3; dc++) {      /* 3 columnas de pantalla */
+                    int col = img_x * 3 + dc;
+                    if (col >= 48) continue;
+                    s_buffer[page * OLED_WIDTH + col] |= (1 << bit);
+                }
+            }
+        }
+    }
+
+    /* — Separador vertical entre imagen y texto (columna 52) — */
+    for (int page = 0; page < OLED_PAGE_COUNT; page++) {
+        s_buffer[page * OLED_WIDTH + 52] = 0xFF;
+    }
+
+    /* — Texto de estado en la mitad derecha (columna 56) — */
+    char line1[16];
+    char line2[16];
+    char line3[16];
+    char line4[16];
+
+    snprintf(line1, sizeof(line1), "RX %d",   img_count);
+    snprintf(line2, sizeof(line2), "%d/%d CHK", chunks_ok, chunks_total);
+    snprintf(line3, sizeof(line3), "R%d",       (int)rssi);   /* RSSI */
+    snprintf(line4, sizeof(line4), "S%d DB",    (int)snr);    /* SNR  */
+
+    buffer_draw_text(56, 0, line1);
+    buffer_draw_text(56, 2, line2);
+    buffer_draw_text(56, 4, line3);
+    buffer_draw_text(56, 6, line4);
+
+    /*
+     * Indicador de integridad: si chunks_ok < chunks_total
+     * (imagen incompleta) escribimos "ERR" en la parte inferior
+     * de la zona de imagen para que sea visible a simple vista.
+     */
+    if (chunks_ok < chunks_total) {
+        buffer_draw_text(0, 6, "CORRUPT");
+    }
+
+    return flush_buffer();
+}
