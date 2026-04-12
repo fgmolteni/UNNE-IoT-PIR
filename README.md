@@ -1,39 +1,36 @@
 # UNNE-IoT-PIR - Sistema IoT de Prevencion de Incendios Rurales
 
-Esta rama contiene la migracion del firmware de la placa `Heltec WiFi LoRa 32 V2` a `ESP-IDF puro`.
+Esta rama contiene el firmware de la placa `Heltec WiFi LoRa 32 V2` en `ESP-IDF puro`.
 
-## Estado de la rama
+## Estado actual
 
-Primera iteracion completada para el firmware:
+- Estructura ESP-IDF modular con componentes independientes
+- OLED SSD1306 con driver propio (I2C)
+- Sensor DHT11
+- Radio LoRa SX1276 con driver propio (SPI)
+- Prueba de transmision de imagen 16×16 por LoRa con protocolo ACK y CRC-8
 
-- estructura ESP-IDF limpia
-- OLED integrada funcionando con driver SSD1306 propio
-- lectura de DHT11
-- logs serie con `ESP_LOGI`
+## Modos de firmware
 
-Esta version del firmware queda limitada a OLED + DHT11, sin integracion LoRa ni TTN.
+**Modo sensor** (por defecto): inicializa OLED + DHT11, muestra temperatura y humedad en pantalla cada 3 s.
+
+**Modo prueba LoRa** (`APP_MODE_LORA_TEST`): lanza `lora_image_test`, que transmite o recibe una imagen 16×16 por LoRa con confirmacion de chunks. Para activarlo, definir `APP_MODE_LORA_TEST` en `app_core.c` y seleccionar TX o RX en `lora_image_test.h`.
 
 ## Directorios relevantes
 
-- `firmware/`: firmware ESP-IDF puro para la Heltec V2
-- `docs/`: documentacion del proyecto y diagramas
+- `firmware/` — firmware ESP-IDF puro para la Heltec V2
+- `docs/` — documentacion del proyecto y diagramas
 
-## Flujo de trabajo del firmware
+## Compilar y flashear
 
 ```bash
 cd firmware
-idf.py set-target esp32
+idf.py set-target esp32   # primera vez
 idf.py build
 idf.py flash monitor
 ```
 
-## Resumen de la migracion
+## Historial de la rama
 
-- Se elimino la dependencia de PlatformIO para el firmware de esta rama.
-- Se elimino la dependencia de Arduino para OLED y DHT11.
-- Se dejo una base liviana enfocada en sensado y visualizacion local.
-
-## Alcance actual
-
-- sensado local con `DHT11`
-- visualizacion local en OLED
+- Migracion de PlatformIO/Arduino a ESP-IDF puro
+- Incorporacion de driver SX1276 y prueba de imagen por LoRa

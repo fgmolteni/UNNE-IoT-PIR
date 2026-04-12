@@ -46,6 +46,52 @@ Monitor baud rate: 115200. Flash size: 8 MB.
 
 To activate LoRa test mode, define `APP_MODE_LORA_TEST` (e.g., in `app_core.c` or via `sdkconfig`/`CMakeLists.txt`). To select TX or RX, edit `firmware/components/lora_image_test/include/lora_image_test.h` and uncomment exactly one of `LORA_IMAGE_MODE_TX` / `LORA_IMAGE_MODE_RX` before flashing.
 
+## LoRa Image Test — Protocol
+
+`lora_image_test` implements a chunked TX/RX protocol with ACK and CRC-8:
+
+- **TX packet header (6 bytes):** `[session_id | chunk_idx | total_chunks | payload_len | reserved | crc8]`
+- **ACK packet (3 bytes):** `[0xAC | session_id | chunk_idx]`
+- **CRC-8:** polynomial 0x07 (Dallas/Maxim) over the payload.
+- `session_id` increments per image; lets the RX discard stale chunks from previous sessions.
+- Key constants: `ACK_TIMEOUT_MS=2000`, `ACK_TX_DELAY_MS=60`, `MAX_RETRIES=5`.
+- If CRC fails, RX does **not** send ACK — silence triggers a TX retry.
+- Duplicate chunk: RX re-sends ACK without re-copying data.
+
+**Init order in `lora_image_test_start()` — critical:**
+```c
+sx1276_init();          // radio first — its hardware reset pulses GPIO 14 low,
+                        // which glitches Vext and would kill the OLED if it were
+                        // already initialized
+vTaskDelay(50 ms);      // wait for Vext to stabilize after reset
+display_init();         // display after, with stable Vext
+display_show_boot();
+vTaskDelay(500 ms);
+```
+Reversing this order causes the OLED to silently fail (SSD1306 discards I2C writes without power, no error returned).
+
+## Gateway
+
+`gateway/` contains configuration and tooling for the RPi4 + RAK5146 SPI gateway:
+
+- Hardware: Raspberry Pi 4 + RAK5146 (SX1302 + 2× SX1250), Pi HAT 40-pin.
+- Software: `sx1302_hal` v2.1.0 compiled from source (RAKWireless install script is incompatible with RPi OS Lite).
+- Frequency plan: AU915 sub-band 2 (916.8–918.2 MHz uplink). Gateway EUI: `0016C001FF1E02BA`.
+- Reset pin: **GPIO 17** (RESET_B). GPIO 18 = power enable. The Semtech reference uses GPIO 23 — wrong for RAK5146 on Pi HAT.
+- GPIO control: `pinctrl` (sysfs `/sys/class/gpio/` is absent in kernel 6.12+).
+- STTS751 temperature sensor is unpopulated on this RAK5146 variant; `loragw_hal.c` is patched to downgrade the fatal error to a warning and return 25 °C.
+- SSH: key `gateway/.ssh/rpi-gateway` (ed25519, private key in `.gitignore`). Connect with `ssh -i gateway/.ssh/rpi-gateway gabi@rpi-gateway`.
+- Packet forwarder runs as systemd service `lora_pkt_fwd` (autostart enabled). Forwards to `localhost:1700`.
+
+## Image Pipeline (planned — not yet in repo)
+
+Future components for fire-detection image processing on the node:
+
+- **OV7670 + AL422B FIFO** — camera capture. Data bus D0–D7: GPIOs 34,35,36,39,22,23,17,32. Control via PCF8574 I/O expander (WRST, RRST pins). Expected output: QVGA 320×240 (to be confirmed with resolution test).
+- **Etapa 0 — BOX downscale** — averages 20×15 source blocks → 16×16 output. Uses fixed reciprocal (`×14318 >> 22` for /300) instead of division. Accumulators: `uint32_t acc_r[16]`, `acc_g[16]` (channel B unused).
+- **Etapa 1 — R−G index** — computes `max(R−G, 0)` per pixel. Buffer: `static int16_t s_idx[16][16]` — must be `int16_t`, not `uint8_t`, because the DWT step produces sums up to 680 which overflow uint8. Fire detection threshold: R−G > 50. Fused into the Etapa 0 loop (no separate pass).
+- **Etapa 2 — compression** — two options under evaluation: DWT Haar 2D (transmits LL+LH+HL subbands, 192 bytes, PSNR ~38 dB) or 4-bit quantization (128 bytes, 16 levels). Decision pending hardware validation of Etapa 1. Both fit in one LoRa packet at SF10/125 kHz.
+
 ## Coding Conventions (C / ESP-IDF)
 
 - 4-space indentation, opening brace on same line as function/control statement.

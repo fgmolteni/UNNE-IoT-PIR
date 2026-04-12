@@ -4,14 +4,18 @@
  * Prueba de transmisión de imagen 16×16 por LoRa.
  * Usa el driver sx1276 (C puro, ESP-IDF spi_master).
  *
- * Protocolo de fragmentación (header de 4 bytes por paquete):
+ * Protocolo ACK con header extendido (6 bytes por paquete TX):
  *
- *   ┌────────────┬──────────────┬──────────────┬─────────────┬────────────────┐
- *   │ chunk_idx  │ total_chunks │ payload_len  │ payload_len │ datos imagen   │
- *   │  (1 byte)  │   (1 byte)   │   hi (1B)    │   lo (1B)   │ (≤200 bytes)  │
- *   └────────────┴──────────────┴──────────────┴─────────────┴────────────────┘
+ *   ┌────────────┬──────────────┬──────────────┬─────────────┬──────────┬──────────┬────────────────┐
+ *   │ session_id │  chunk_idx   │ total_chunks │ payload_len │  rsv     │  crc8    │ datos imagen   │
+ *   │  (1 byte)  │   (1 byte)   │   (1 byte)   │  (1 byte)   │ (1 byte) │ (1 byte) │ (≤200 bytes)  │
+ *   └────────────┴──────────────┴──────────────┴─────────────┴──────────┴──────────┴────────────────┘
+ *
+ * Paquete ACK del RX (3 bytes): [0xAC | session_id | chunk_idx]
  *
  * Con IMG_SIZE=256 bytes y CHUNK_PAYLOAD=200 → 2 paquetes por imagen.
+ * El TX espera ACK por cada chunk antes de enviar el siguiente.
+ * Si no llega ACK en ACK_TIMEOUT_MS → reintenta hasta MAX_RETRIES.
  */
 
 #include "lora_image_test.h"
@@ -45,7 +49,18 @@ static const char *TAG = "lora_img_test";
  */
 #define CHUNK_PAYLOAD  200
 #define MAX_CHUNKS     ((IMG_SIZE + CHUNK_PAYLOAD - 1) / CHUNK_PAYLOAD)  /* 2 */
-#define PACKET_SIZE    (4 + CHUNK_PAYLOAD)   /* header + payload máx */
+
+/* ─────────────────────────────────────────────────────────────────
+ * Protocolo ACK
+ * ───────────────────────────────────────────────────────────────── */
+#define HEADER_LEN_ACK   6        /* session | idx | total | len | rsv | crc8 */
+#define ACK_LEN          3        /* 0xAC | session_id | chunk_idx            */
+#define ACK_MAGIC        0xAC
+#define ACK_TIMEOUT_MS   2000     /* ms esperando ACK antes de reintentar     */
+#define MAX_RETRIES      5        /* reintentos por chunk antes de abortar    */
+#define ACK_TX_DELAY_MS  60       /* pausa antes de transmitir ACK (RX→TX)   */
+
+#define PACKET_SIZE    (HEADER_LEN_ACK + CHUNK_PAYLOAD)   /* header extendido + payload */
 
 /* ─────────────────────────────────────────────────────────────────
  * Parámetros LoRa para la prueba
@@ -63,7 +78,8 @@ static const sx1276_config_t LORA_CFG = {
  * Buffers estáticos — no en stack para evitar stack overflow en tasks
  * ───────────────────────────────────────────────────────────────── */
 static uint8_t s_img_buf[IMG_SIZE];
-static uint8_t s_packet_buf[PACKET_SIZE];
+static uint8_t s_packet_buf[HEADER_LEN_ACK + CHUNK_PAYLOAD]; /* header extendido */
+static uint8_t s_session_id = 0;   /* incrementa con cada imagen TX          */
 
 /* Buffers y estado exclusivos del receptor */
 #ifdef LORA_IMAGE_MODE_RX
@@ -132,26 +148,82 @@ static void image_print_csv(const uint8_t *buf, const char *label)
 }
 
 /* ─────────────────────────────────────────────────────────────────
+ * CRC-8 (polinomio 0x07, Dallas/Maxim) — protege el payload
+ * ───────────────────────────────────────────────────────────────── */
+static uint8_t crc8_calc(const uint8_t *data, size_t len)
+{
+    uint8_t crc = 0x00;
+    for (size_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (int b = 0; b < 8; b++)
+            crc = (crc & 0x80) ? (crc << 1) ^ 0x07 : (crc << 1);
+    }
+    return crc;
+}
+
+/* ─────────────────────────────────────────────────────────────────
+ * wait_ack — espera ACK del RX con timeout.
+ * Retorna true si llegó ACK válido (session y chunk coinciden).
+ * ───────────────────────────────────────────────────────────────── */
+static bool wait_ack(sx1276_t *radio, uint8_t session_id, uint8_t chunk_idx)
+{
+    uint8_t buf[16];
+    uint8_t rx_len = 0;
+    int16_t rssi   = 0;
+    int8_t  snr    = 0;
+
+    /* Usamos ACK_TIMEOUT_MS dividido en ventanas de 300 ms para
+     * no bloquear el watchdog y poder inspeccionar paquetes basura */
+    TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(ACK_TIMEOUT_MS);
+
+    while (xTaskGetTickCount() < deadline) {
+        esp_err_t err = sx1276_receive(radio, buf, &rx_len, &rssi, &snr, 300);
+
+        if (err == ESP_OK && rx_len == ACK_LEN &&
+            buf[0] == ACK_MAGIC &&
+            buf[1] == session_id &&
+            buf[2] == chunk_idx)
+        {
+            ESP_LOGI(TAG, "TX: ACK chunk=%d session=%d RSSI=%d dBm ✓",
+                     chunk_idx, session_id, rssi);
+            return true;
+        }
+
+        if (err == ESP_OK)
+            ESP_LOGW(TAG, "TX: paquete extraño (%d bytes) esperando ACK", rx_len);
+    }
+
+    ESP_LOGW(TAG, "TX: timeout ACK chunk=%d session=%d", chunk_idx, session_id);
+    return false;
+}
+
+/* ─────────────────────────────────────────────────────────────────
  * TX — Fragmentación y transmisión
  * ───────────────────────────────────────────────────────────────── */
 
 /*
- * Arma y envía todos los chunks de una imagen.
- * Retorna el número de chunks enviados exitosamente.
+ * transmit_image — envía todos los chunks con confirmación ACK.
  *
- * Secuencia por chunk:
- *   1. Calcular offset y largo del payload de este chunk
- *   2. Armar el paquete: [idx | total | len_hi | len_lo | datos...]
- *   3. Llamar sx1276_transmit()
- *   4. Esperar 500 ms para que el receptor vuelva al modo escucha
- *      antes del próximo paquete
+ * Header extendido (6 bytes):
+ *   [0] session_id   — ID de esta imagen (evita chunks de imagen anterior)
+ *   [1] chunk_idx
+ *   [2] total_chunks
+ *   [3] payload_len  (≤ CHUNK_PAYLOAD, siempre < 256)
+ *   [4] 0x00         — reservado
+ *   [5] crc8         — CRC8 del payload
+ *
+ * Por cada chunk: transmite → espera ACK → si no llega, reintenta
+ * hasta MAX_RETRIES antes de abortar la imagen.
  */
 static int transmit_image(sx1276_t *radio, const uint8_t *img, uint16_t img_size)
 {
     uint8_t total = (uint8_t)((img_size + CHUNK_PAYLOAD - 1) / CHUNK_PAYLOAD);
     int     ok    = 0;
 
-    ESP_LOGI(TAG, "TX iniciando: %d bytes → %d chunks", img_size, total);
+    s_session_id++;   /* nueva sesión por cada imagen */
+
+    ESP_LOGI(TAG, "TX iniciando: session=%d  %d bytes → %d chunks",
+             s_session_id, img_size, total);
 
     for (uint8_t i = 0; i < total; i++) {
 
@@ -160,29 +232,48 @@ static int transmit_image(sx1276_t *radio, const uint8_t *img, uint16_t img_size
                           ? (img_size - offset)
                           : CHUNK_PAYLOAD;
 
-        /* Armar paquete en el buffer estático */
-        s_packet_buf[0] = i;                       /* chunk_idx      */
-        s_packet_buf[1] = total;                   /* total_chunks   */
-        s_packet_buf[2] = (uint8_t)(plen >> 8);    /* payload_len_hi */
-        s_packet_buf[3] = (uint8_t)(plen & 0xFF);  /* payload_len_lo */
-        memcpy(s_packet_buf + 4, img + offset, plen);
+        uint8_t chk = crc8_calc(img + offset, plen);
 
-        esp_err_t err = sx1276_transmit(radio, s_packet_buf, (uint8_t)(4 + plen));
+        /* Construir paquete */
+        s_packet_buf[0] = s_session_id;
+        s_packet_buf[1] = i;
+        s_packet_buf[2] = total;
+        s_packet_buf[3] = (uint8_t)plen;
+        s_packet_buf[4] = 0x00;    /* reservado */
+        s_packet_buf[5] = chk;
+        memcpy(s_packet_buf + HEADER_LEN_ACK, img + offset, plen);
 
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "  Chunk %d/%d OK  (%d bytes payload)", i + 1, total, plen);
-            ok++;
-        } else {
-            ESP_LOGE(TAG, "  Chunk %d/%d ERROR: %s", i + 1, total, esp_err_to_name(err));
+        uint8_t pkt_len = HEADER_LEN_ACK + (uint8_t)plen;
+        bool    ack_ok  = false;
+
+        for (int attempt = 0; attempt < MAX_RETRIES; attempt++) {
+
+            if (attempt > 0)
+                ESP_LOGW(TAG, "  Reintento %d chunk=%d session=%d",
+                         attempt, i, s_session_id);
+
+            esp_err_t err = sx1276_transmit(radio, s_packet_buf, pkt_len);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "  sx1276_transmit error: %s", esp_err_to_name(err));
+                vTaskDelay(pdMS_TO_TICKS(100));
+                continue;
+            }
+
+            ESP_LOGI(TAG, "  Chunk %d/%d enviado (session=%d plen=%d CRC=0x%02X)",
+                     i + 1, total, s_session_id, (int)plen, chk);
+
+            /* Pequeña pausa para que el RX procese y cambie a TX */
+            vTaskDelay(pdMS_TO_TICKS(200));
+
+            ack_ok = wait_ack(radio, s_session_id, i);
+            if (ack_ok) { ok++; break; }
         }
 
-        /*
-         * Pausa entre chunks: le da tiempo al receptor de salir del
-         * modo RxSingle, procesar el paquete y volver a llamar
-         * sx1276_receive() antes de que llegue el siguiente.
-         * 500 ms es conservador; se puede bajar a 300 ms si funciona.
-         */
-        vTaskDelay(pdMS_TO_TICKS(500));
+        if (!ack_ok) {
+            ESP_LOGE(TAG, "  Chunk %d falló tras %d intentos — abortando imagen",
+                     i, MAX_RETRIES);
+            break;
+        }
     }
 
     return ok;
@@ -259,6 +350,24 @@ static void dump_image_uart(const uint8_t *buf)
     image_print_csv(buf, "IMAGEN RX");
 }
 
+/* session_id de la imagen en curso (RX) */
+static uint8_t s_rx_session_id = 0;
+
+/*
+ * send_ack — transmite el ACK al TX.
+ * 3 bytes: [0xAC | session_id | chunk_idx]
+ */
+static void send_ack(sx1276_t *radio, uint8_t session_id, uint8_t chunk_idx)
+{
+    uint8_t ack[ACK_LEN] = { ACK_MAGIC, session_id, chunk_idx };
+    vTaskDelay(pdMS_TO_TICKS(ACK_TX_DELAY_MS));
+    esp_err_t err = sx1276_transmit(radio, ack, ACK_LEN);
+    if (err == ESP_OK)
+        ESP_LOGI(TAG, "  ACK enviado → session=%d chunk=%d ✓", session_id, chunk_idx);
+    else
+        ESP_LOGE(TAG, "  Error enviando ACK: %s", esp_err_to_name(err));
+}
+
 /*
  * Resetea el estado del receptor para la siguiente imagen.
  * Se llama al recibir un chunk_idx==0 (nueva imagen) o
@@ -284,26 +393,39 @@ static bool rx_is_complete(void)
 }
 
 /*
- * Procesa un paquete recibido: valida el header, copia el payload
- * en la posición correcta del buffer y verifica si la imagen está completa.
+ * rx_process_packet — valida header extendido, CRC y session_id.
+ *
+ * Header esperado (6 bytes):
+ *   [0] session_id
+ *   [1] chunk_idx
+ *   [2] total_chunks
+ *   [3] payload_len
+ *   [4] reservado
+ *   [5] crc8
  *
  * Retorna true si la imagen quedó completa con este chunk.
+ * El radio se pasa para poder enviar el ACK desde aquí.
  */
-static bool rx_process_packet(const uint8_t *pkt, uint8_t pkt_len,
+static bool rx_process_packet(sx1276_t *radio,
+                               const uint8_t *pkt, uint8_t pkt_len,
                                int16_t rssi, int8_t snr)
 {
-    /* Validar largo mínimo */
-    if (pkt_len < 5) {
-        ESP_LOGW(TAG, "RX: paquete demasiado corto (%d bytes)", pkt_len);
+    /* Validar largo mínimo para el header extendido */
+    if (pkt_len < HEADER_LEN_ACK + 1) {
+        ESP_LOGW(TAG, "RX: paquete muy corto (%d bytes) — descartado", pkt_len);
         return false;
     }
 
-    uint8_t  chunk_idx    = pkt[0];
-    uint8_t  total_chunks = pkt[1];
-    uint16_t payload_len  = ((uint16_t)pkt[2] << 8) | pkt[3];
-    const uint8_t *data   = pkt + 4;
+    /* ── Decodificar header extendido ── */
+    uint8_t  session_id   = pkt[0];
+    uint8_t  chunk_idx    = pkt[1];
+    uint8_t  total_chunks = pkt[2];
+    uint8_t  payload_len  = pkt[3];
+    /* pkt[4] reservado */
+    uint8_t  rx_crc       = pkt[5];
+    const uint8_t *data   = pkt + HEADER_LEN_ACK;
 
-    /* Validaciones de header */
+    /* ── Validaciones básicas de header ── */
     if (total_chunks == 0 || total_chunks > MAX_CHUNKS) {
         ESP_LOGW(TAG, "RX: total_chunks inválido: %d", total_chunks);
         return false;
@@ -316,48 +438,74 @@ static bool rx_process_packet(const uint8_t *pkt, uint8_t pkt_len,
         ESP_LOGW(TAG, "RX: payload_len inválido: %d", payload_len);
         return false;
     }
+    if (pkt_len < HEADER_LEN_ACK + payload_len) {
+        ESP_LOGW(TAG, "RX: paquete truncado (esperado=%d recibido=%d)",
+                 HEADER_LEN_ACK + payload_len, pkt_len);
+        return false;
+    }
 
-    /*
-     * Si es el primer chunk de una nueva imagen:
-     * resetear el estado de recepción.
-     * Si no es el primero y aún no recibimos el chunk 0:
-     * descartamos porque no sabemos cuántos chunks esperar.
-     */
+    /* ── Validar CRC8 ── */
+    uint8_t calc_crc = crc8_calc(data, payload_len);
+    if (calc_crc != rx_crc) {
+        ESP_LOGE(TAG, "RX: CRC error chunk=%d session=%d "
+                      "(rx=0x%02X calc=0x%02X) — no ACK",
+                 chunk_idx, session_id, rx_crc, calc_crc);
+        return false;   /* sin ACK → TX reintentará */
+    }
+
+    /* ── Detectar sesión nueva ── */
     if (chunk_idx == 0) {
-        if (s_total_chunks_expected != 0) {
-            ESP_LOGW(TAG, "RX: nueva imagen antes de completar la anterior — reseteando");
-        }
+        if (s_total_chunks_expected != 0)
+            ESP_LOGW(TAG, "RX: nueva sesión=%d antes de completar sesión=%d",
+                     session_id, s_rx_session_id);
         rx_reset();
+        s_rx_session_id         = session_id;
         s_total_chunks_expected = total_chunks;
+        ESP_LOGI(TAG, "RX: nueva sesión=%d, esperando %d chunks",
+                 session_id, total_chunks);
+
+    } else if (session_id != s_rx_session_id) {
+        /* Chunk de sesión diferente y no es chunk 0 — descartar sin ACK */
+        ESP_LOGW(TAG, "RX: chunk %d de sesión=%d pero activa sesión=%d — descartado",
+                 chunk_idx, session_id, s_rx_session_id);
+        return false;
+
     } else if (s_total_chunks_expected == 0) {
         ESP_LOGW(TAG, "RX: chunk %d recibido sin chunk 0 previo — descartado", chunk_idx);
         return false;
     }
 
-    /* Verificar que el payload no se sale del buffer */
-    uint16_t offset = (uint16_t)chunk_idx * CHUNK_PAYLOAD;
-    if (offset + payload_len > IMG_SIZE) {
-        ESP_LOGW(TAG, "RX: overflow — offset %d + len %d > %d",
-                 offset, payload_len, IMG_SIZE);
+    /* ── Chunk duplicado: re-enviar ACK sin re-copiar datos ── */
+    if (s_chunk_received[chunk_idx]) {
+        ESP_LOGW(TAG, "RX: chunk %d duplicado — re-enviando ACK", chunk_idx);
+        send_ack(radio, session_id, chunk_idx);
         return false;
     }
 
-    /* Copiar datos al buffer de imagen */
+    /* ── Verificar que el payload no desborde el buffer ── */
+    uint16_t offset = (uint16_t)chunk_idx * CHUNK_PAYLOAD;
+    if (offset + payload_len > IMG_SIZE) {
+        ESP_LOGW(TAG, "RX: overflow offset=%d len=%d > %d", offset, payload_len, IMG_SIZE);
+        return false;
+    }
+
+    /* ── Copiar datos y marcar chunk ── */
     memcpy(s_rx_buf + offset, data, payload_len);
     s_chunk_received[chunk_idx] = true;
 
-    ESP_LOGI(TAG, "  Chunk %d/%d OK  payload=%d bytes  RSSI=%d dBm  SNR=%d dB",
-             chunk_idx + 1, total_chunks, payload_len, rssi, snr);
+    ESP_LOGI(TAG, "  Chunk %d/%d OK  session=%d payload=%d CRC=0x%02X  RSSI=%d SNR=%d",
+             chunk_idx + 1, total_chunks, session_id,
+             payload_len, rx_crc, rssi, snr);
 
-    /* Mostrar chunks faltantes si la imagen no está completa */
+    /* ── Enviar ACK ── */
+    send_ack(radio, session_id, chunk_idx);
+
+    /* ── ¿Imagen completa? ── */
     if (!rx_is_complete()) {
-        char missing[64];
-        int  pos = snprintf(missing, sizeof(missing), "  Faltantes: ");
-        for (int i = 0; i < s_total_chunks_expected; i++) {
-            if (!s_chunk_received[i]) {
+        char missing[64]; int pos = snprintf(missing, sizeof(missing), "  Faltantes: ");
+        for (int i = 0; i < s_total_chunks_expected; i++)
+            if (!s_chunk_received[i])
                 pos += snprintf(missing + pos, sizeof(missing) - pos, "%d ", i);
-            }
-        }
         ESP_LOGI(TAG, "%s", missing);
         return false;
     }
@@ -393,7 +541,7 @@ static void lora_image_rx_task(void *arg)
                                        &rssi, &snr, RX_TIMEOUT_MS);
 
         if (err == ESP_OK) {
-            bool complete = rx_process_packet(rx_data, rx_len, rssi, snr);
+            bool complete = rx_process_packet(radio, rx_data, rx_len, rssi, snr);
 
             if (complete) {
                 img_count++;
